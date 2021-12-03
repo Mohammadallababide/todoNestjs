@@ -1,8 +1,9 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { SequelizeModule } from '@nestjs/sequelize';
 import { ConfigService } from '@nestjs/config';
 import { IAppConfig, IDatabase } from '../app-config';
-
+import { Todo } from '../todo-list';
+@Global()
 @Module({
   imports: [
     SequelizeModule.forRootAsync({
@@ -11,7 +12,8 @@ import { IAppConfig, IDatabase } from '../app-config';
         return {
           dialect: dbConfig.dialect,
           database: dbConfig.name,
-          models: [],
+          autoLoadModels: true,
+          models: [Todo],
           username: dbConfig.username,
           password: dbConfig.password,
           pool: {

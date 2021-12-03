@@ -8,8 +8,9 @@ import {
   Post,
   Put,
 } from '@nestjs/common';
-import { CreateTodoListDto, UpdateTodoListDto } from './dtos';
+import { CreateTodoDto, UpdateTodoDto } from './dtos';
 import { ApiHeaders, ApiTags } from '@nestjs/swagger';
+import { TodoService } from './todo.service';
 const dummyTodoLists = [];
 @ApiTags('Todo-List Controller')
 @ApiHeaders([
@@ -20,17 +21,17 @@ const dummyTodoLists = [];
   },
 ])
 @Controller({
-  path: 'todo-list',
+  path: 'todo',
 })
-export class TodoListController {
+export class TodoController {
+  constructor(private readonly todoService: TodoService) {}
   /***
    * Creating todo list with providing title
-   * @param createTodoListDto
+   * @param createTodoDto
    */
   @Post()
-  createTodoList(@Body() createTodoListDto: CreateTodoListDto) {
-    dummyTodoLists.push({ ...createTodoListDto, id: new Date().toISOString() });
-    return createTodoListDto;
+  createTodo(@Body() createTodoDto: CreateTodoDto) {
+    return this.todoService.createOne(createTodoDto);
   }
 
   /***
@@ -40,7 +41,7 @@ export class TodoListController {
   @Put(':id')
   updateTodoList(
     @Param('id') id: string,
-    @Body() updateTodoListDto: UpdateTodoListDto,
+    @Body() updateTodoListDto: UpdateTodoDto,
   ) {
     const todoList = dummyTodoLists.filter((tl) => tl.id === id)[0];
 

@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
-import { TodoListModule } from './todo-list';
+import { TodoModule } from './todo-list';
 import { AppConfigModule } from './app-config';
 import { DatabaseModule } from './database';
 
 @Module({
-  imports: [AppConfigModule, DatabaseModule, TodoListModule],
+  imports: [AppConfigModule, DatabaseModule, TodoModule],
   controllers: [],
   providers: [],
 })
