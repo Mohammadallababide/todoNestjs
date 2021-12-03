@@ -9,10 +9,10 @@ import { TodoList } from '../todo-list';
 @Module({
   imports: [
     SequelizeModule.forRootAsync({
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
       useFactory: (configService: ConfigService<IAppConfig>) => {
-        const dbConfig = configService.get<IDatabase>('database');
+        const dbConfig = configService.get<IDatabase>('database', {
+          infer: true,
+        });
         return {
           dialect: dbConfig.dialect,
           database: dbConfig.name,
