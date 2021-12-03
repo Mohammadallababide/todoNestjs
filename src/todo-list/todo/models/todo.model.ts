@@ -1,10 +1,18 @@
 import { Optional } from 'sequelize';
-import { Column, Table } from 'sequelize-typescript';
+import {
+  BelongsTo,
+  Column,
+  DataType,
+  ForeignKey,
+  Table,
+} from 'sequelize-typescript';
 import { Model } from 'sequelize-typescript';
+import { TodoList } from '../../models';
 export interface TodoAttributes {
   id: number;
   title: string;
   content: string;
+  todoListId: number;
 }
 export type TodoCreationAttributes = Optional<TodoAttributes, 'id'>;
 
@@ -12,7 +20,7 @@ export type TodoCreationAttributes = Optional<TodoAttributes, 'id'>;
   paranoid: true,
   timestamps: true,
   version: true,
-  tableName: 'todos',
+  tableName: 'todo',
   freezeTableName: true,
 })
 export class Todo
@@ -22,12 +30,30 @@ export class Todo
   @Column({
     autoIncrement: true,
     primaryKey: true,
+    type: DataType.INTEGER,
   })
   id: number;
 
-  @Column({})
+  @Column
   title: string;
 
   @Column
   content: string;
+
+  @Column({
+    type: DataType.ENUM,
+    values: ['TODO', 'DONE'],
+    defaultValue: 'TODO',
+  })
+  status: 'TODO' | 'DONE';
+
+  @ForeignKey(() => TodoList)
+  @Column({
+    type: DataType.INTEGER,
+    allowNull: false,
+  })
+  todoListId: number;
+
+  @BelongsTo(() => TodoList)
+  todoList: TodoList;
 }

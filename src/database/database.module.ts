@@ -2,7 +2,8 @@ import { Global, Module } from '@nestjs/common';
 import { SequelizeModule } from '@nestjs/sequelize';
 import { ConfigService } from '@nestjs/config';
 import { IAppConfig, IDatabase } from '../app-config';
-import { Todo } from '../todo-list';
+import { Todo } from '../todo-list/todo';
+import { TodoList } from '../todo-list';
 @Global()
 @Module({
   imports: [
@@ -13,9 +14,13 @@ import { Todo } from '../todo-list';
           dialect: dbConfig.dialect,
           database: dbConfig.name,
           autoLoadModels: true,
-          models: [Todo],
+          models: [Todo, TodoList],
           username: dbConfig.username,
           password: dbConfig.password,
+          synchronize: true,
+          sync: {
+            force: true,
+          },
           pool: {
             max: dbConfig.pool?.max,
             min: dbConfig.pool?.min,

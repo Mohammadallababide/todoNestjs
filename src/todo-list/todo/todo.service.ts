@@ -1,18 +1,23 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Todo } from './models';
 import { CreateTodoDto } from './dtos';
+import { InjectModel } from '@nestjs/sequelize';
 
 @Injectable()
 export class TodoService {
   constructor(
-    @Inject('TODO_REPOSITORY')
+    @InjectModel(Todo)
     private todoModel: typeof Todo,
   ) {}
 
   createOne(createTodoDto: CreateTodoDto) {
-    return this.todoModel.create({
+    console.log({
+      createTodoDto,
+    });
+    return this.todoModel.create<Todo>({
       title: createTodoDto.title,
       content: createTodoDto.content,
+      todoListId: createTodoDto.todoListId,
     });
   }
 }
