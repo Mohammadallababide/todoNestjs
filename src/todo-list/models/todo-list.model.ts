@@ -1,7 +1,6 @@
 import { Optional } from 'sequelize';
-import { Column, DataType, HasMany, Table } from 'sequelize-typescript';
+import { Column, DataType, Table } from 'sequelize-typescript';
 import { Model } from 'sequelize-typescript';
-import { Todo } from '../todo';
 export interface TodoListAttributes {
   id: number;
   title: string;
@@ -11,7 +10,7 @@ export type TodoListCreationAttributes = Optional<TodoListAttributes, 'id'>;
 @Table({
   paranoid: true,
   timestamps: true,
-  version: true,
+  version: false,
   tableName: 'todos',
   freezeTableName: true,
 })

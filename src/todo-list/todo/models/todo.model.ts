@@ -47,6 +47,8 @@ export class Todo
   })
   status: 'TODO' | 'DONE';
 
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
   @ForeignKey(() => TodoList)
   @Column({
     type: DataType.INTEGER,
@@ -54,6 +56,8 @@ export class Todo
   })
   todoListId: number;
 
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
   @BelongsTo(() => TodoList)
   todoList: TodoList;
 }

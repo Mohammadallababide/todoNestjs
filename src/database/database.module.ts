@@ -4,10 +4,13 @@ import { ConfigService } from '@nestjs/config';
 import { IAppConfig, IDatabase } from '../app-config';
 import { Todo } from '../todo-list/todo';
 import { TodoList } from '../todo-list';
+
 @Global()
 @Module({
   imports: [
     SequelizeModule.forRootAsync({
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
       useFactory: (configService: ConfigService<IAppConfig>) => {
         const dbConfig = configService.get<IDatabase>('database');
         return {
