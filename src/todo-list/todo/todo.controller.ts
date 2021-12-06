@@ -23,6 +23,13 @@ import { Todo } from './models';
   },
   query: {
     alwaysPaginate: true,
+    join: {
+      todoList: {
+        alias: 'todoList',
+        eager: true,
+        // required: true,
+      },
+    },
   },
 })
 @UseInterceptors(CrudWrapperInterceptor)

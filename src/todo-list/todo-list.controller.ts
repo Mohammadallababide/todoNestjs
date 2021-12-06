@@ -27,6 +27,13 @@ import { CrudWrapperInterceptor } from '../shared';
   },
   query: {
     alwaysPaginate: true,
+    join: {
+      todos: {
+        alias: 'todos',
+        eager: true,
+        // required: true,
+      },
+    },
   },
 })
 @UseInterceptors(CrudWrapperInterceptor)
