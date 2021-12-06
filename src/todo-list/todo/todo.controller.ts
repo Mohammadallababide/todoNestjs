@@ -7,11 +7,16 @@ import {
   Param,
   Post,
   Put,
+  UseInterceptors,
 } from '@nestjs/common';
 import { CreateTodoDto, UpdateTodoDto } from './dtos';
 import { ApiHeaders, ApiTags } from '@nestjs/swagger';
 import { TodoService } from './todo.service';
-const dummyTodoLists = [];
+import { Crud, CrudController } from '@nestjsx/crud';
+import { TodoList } from '../models';
+import { CreateTodoListDto, UpdateTodoListDto } from '../dtos';
+import { CrudWrapperInterceptor } from '../../shared';
+import { Todo } from './models';
 @ApiTags('Todo-List Controller')
 @ApiHeaders([
   {
@@ -20,52 +25,26 @@ const dummyTodoLists = [];
     description: 'JWT token is required for authentication',
   },
 ])
+@Crud({
+  model: {
+    type: Todo,
+  },
+  dto: {
+    create: CreateTodoDto,
+    update: UpdateTodoDto,
+  },
+  serialize: {
+    get: Todo,
+    create: Todo,
+  },
+  query: {
+    alwaysPaginate: true,
+  },
+})
+@UseInterceptors(CrudWrapperInterceptor)
 @Controller({
   path: 'todo',
 })
-export class TodoController {
-  constructor(private readonly todoService: TodoService) {}
-  /***
-   * Creating todo list with providing title
-   * @param createTodoDto
-   */
-  @Post()
-  createTodo(@Body() createTodoDto: CreateTodoDto) {
-    return this.todoService.createOne(createTodoDto);
-  }
-
-  /***
-   * Updating one todo list providing title as an optional field
-   * @param updateTodoListDto
-   */
-  @Put(':id')
-  updateTodoList(
-    @Param('id') id: string,
-    @Body() updateTodoListDto: UpdateTodoDto,
-  ) {
-    const todoList = dummyTodoLists.filter((tl) => tl.id === id)[0];
-
-    if (!todoList) {
-      throw new NotFoundException('Todo list does not exist');
-    }
-    todoList.title = updateTodoListDto.title;
-    return todoList;
-  }
-
-  /***
-   * Deleting todo list by id
-   * @param id
-   */
-  @Delete(':id')
-  deleteTodoList(@Param('id') id: string) {
-    return 'deleted ' + id;
-  }
-
-  /***
-   * Getting all todo lists in the system
-   */
-  @Get()
-  findAllTodoLists() {
-    return dummyTodoLists;
-  }
+export class TodoController implements CrudController<Todo> {
+  constructor(public readonly service: TodoService) {}
 }

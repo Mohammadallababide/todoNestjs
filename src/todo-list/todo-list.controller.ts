@@ -23,7 +23,6 @@ import { CrudWrapperInterceptor } from '../shared';
   query: {
     alwaysPaginate: true,
   },
-  validation: {},
 })
 @UseInterceptors(CrudWrapperInterceptor)
 @Controller('todo-list')

@@ -20,10 +20,7 @@ import { TodoList } from '../todo-list';
           models: [Todo, TodoList],
           username: dbConfig.username,
           password: dbConfig.password,
-          synchronize: true,
-          sync: {
-            force: true,
-          },
+          synchronize: false,
           pool: {
             max: dbConfig.pool?.max,
             min: dbConfig.pool?.min,

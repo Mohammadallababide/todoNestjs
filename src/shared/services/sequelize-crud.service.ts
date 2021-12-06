@@ -24,7 +24,7 @@ import {
   isDate,
 } from '@nestjsx/util';
 import { oO } from '@zmotivat0r/o0';
-import { Model } from 'sequelize-typescript';
+import { Model, ModelCtor } from 'sequelize-typescript';
 import Sequelize, { Op } from 'sequelize';
 import _ from 'lodash';
 import { classToPlain } from 'class-transformer';
@@ -46,13 +46,10 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
   protected entityRelationsHash: Record<string, Relation> = {};
   protected hasManyRelations: any[] = [];
 
-  constructor(protected model: T & typeof Model) {
+  constructor(protected model: ModelCtor<T>) {
     super();
     this.onInitMapEntityColumns();
     this.onInitMapRelations();
-  }
-  recoverOne(_req: CrudRequest): Promise<void | T> {
-    throw new Error('Un-implemented method');
   }
   public get findOne() {
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
