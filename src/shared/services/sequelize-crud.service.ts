@@ -4,7 +4,6 @@ import {
   CrudRequestOptions,
   CrudService,
   GetManyDefaultResponse,
-  JoinOption,
   JoinOptions,
   QueryOptions,
 } from '@nestjsx/crud';
@@ -13,6 +12,7 @@ import {
   QueryFilter,
   ComparisonOperator,
   QueryJoin,
+  CondOperator,
 } from '@nestjsx/crud-request';
 import {
   hasLength,
@@ -21,49 +21,52 @@ import {
   isUndefined,
   objKeys,
   isNil,
+  isDate,
 } from '@nestjsx/util';
 import { oO } from '@zmotivat0r/o0';
 import { Model, ModelCtor } from 'sequelize-typescript';
-import * as Sequelize from 'sequelize';
-import * as _ from 'lodash';
+import Sequelize, { Op } from 'sequelize';
+import _ from 'lodash';
 import { classToPlain } from 'class-transformer';
+import { COUNT_SCOPE, FIND_ALL_SCOPE } from './constants';
+import { CountOptions } from 'sequelize/types';
 
 interface Relation {
-  target: typeof Model;
-  as: string;
-  allowedColumns: string[];
-  primaryColumns: string[];
+  type: string;
+  columns: string[];
+  referencedColumn: string;
+  name: string;
+  modelName: string;
 }
 
 export class SequelizeCrudService<T extends Model> extends CrudService<T> {
   protected entityColumns: string[];
   protected entityPrimaryColumns: string[];
   protected entityColumnsHash: Record<string, any> = {};
-  protected entityRelationsHash: Map<string, Relation> = new Map();
-  protected sqlInjectionRegEx: RegExp[] = [
-    /(%27)|(\')|(--)|(%23)|(#)/gi,
-    /((%3D)|(=))[^\n]*((%27)|(\')|(--)|(%3B)|(;))/gi,
-    /w*((%27)|(\'))((%6F)|o|(%4F))((%72)|r|(%52))/gi,
-    /((%27)|(\'))union/gi,
-  ];
+  protected entityRelationsHash: Record<string, Relation> = {};
+  protected hasManyRelations: any[] = [];
 
   constructor(protected model: ModelCtor<T>) {
     super();
     this.onInitMapEntityColumns();
+    this.onInitMapRelations();
+  }
+  public get findOne() {
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    return this.model.findOne.bind(this.model);
   }
 
-  public async findOne(options: Sequelize.FindOptions): Promise<T | null> {
-    const item = await this.model.findOne(options);
-    return item as T | null;
+  public get find() {
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    return this.model.findAll.bind(this.model);
   }
 
-  public async find(options: Sequelize.FindOptions): Promise<T[]> {
-    const items = await this.model.findAll(options);
-    return items as T[];
-  }
-
-  public async count(options: Sequelize.CountOptions): Promise<number> {
-    return this.model.count(options);
+  public get count() {
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    return this.model.count.bind(this.model);
   }
 
   /**
@@ -72,31 +75,10 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
    */
   public async getMany(
     req: CrudRequest,
-  ): Promise<GetManyDefaultResponse<T> | T[]> {
+  ): Promise<GetManyDefaultResponse<T> | T[] | any> {
     const { parsed, options } = req;
     const query = this.createBuilder(parsed, options);
-    const shouldPaginate = this.decidePagination(parsed, options);
-    const res = await this.model.findAll({
-      ...query,
-      ...(shouldPaginate ? { subQuery: undefined } : {}),
-    });
-    if (shouldPaginate) {
-      const count = await this.model.count({
-        ...query,
-        attributes: [],
-        distinct: true,
-        col: 'id',
-      });
-      // const { rows: data, count: total } = await this.model.findAndCountAll(query);
-      return this.createPageInfo(
-        res as T[],
-        count,
-        this.getTake(parsed, options.query),
-        query.offset,
-      );
-    }
-
-    return res as T[];
+    return this.executeQuery(parsed, options, query);
   }
 
   /**
@@ -120,25 +102,25 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
     if (!entity) {
       this.throwBadRequestException(`Empty data. Nothing to save.`);
     }
-
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
     const saved = await this.model.create(entity);
 
     if (returnShallow) {
       return saved as T;
     } else {
-      const primaryParams = this.getPrimaryParams(req.options);
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      const primaryParam = this.getPrimaryParam(req.options);
 
       /* istanbul ignore if */
       if (
-        !primaryParams.length &&
-        /* istanbul ignore next */ primaryParams.some((p) => isNil(saved[p]))
+        !primaryParam &&
+        /* istanbul ignore next */ isNil(saved[primaryParam])
       ) {
         return saved as T;
       } else {
-        req.parsed.search = primaryParams.reduce(
-          (acc, p) => ({ ...acc, [p]: saved[p] }),
-          {},
-        );
+        req.parsed.search = { [primaryParam]: saved[primaryParam] };
         return this.getOneOrFail(req);
       }
     }
@@ -166,7 +148,8 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
     if (!hasLength(bulk)) {
       this.throwBadRequestException(`Empty data. Nothing to save.`);
     }
-
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
     const created = await this.model.bulkCreate(bulk, { returning: true });
     return created as T[];
   }
@@ -179,10 +162,10 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
   public async updateOne(req: CrudRequest, dto: T): Promise<T> {
     const { allowParamsOverride, returnShallow } =
       req.options.routes.updateOneBase;
-    let tdto = this.transformDto(dto) as T;
+    const tdto = this.transformDto(dto) as T;
     const paramsFilters = this.getParamFilters(req.parsed);
     const found = await this.getOneOrFail(req, returnShallow);
-    let toSave = !allowParamsOverride
+    const toSave = !allowParamsOverride
       ? { ...tdto, ...paramsFilters, ...req.parsed.authPersist }
       : { ...tdto, ...req.parsed.authPersist };
 
@@ -209,20 +192,22 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
   public async replaceOne(req: CrudRequest, dto: T): Promise<T> {
     const { allowParamsOverride, returnShallow } =
       req.options.routes.replaceOneBase;
-    let tdto = this.transformDto(dto) as T;
+    const tdto = this.transformDto(dto) as T;
     const paramsFilters = this.getParamFilters(req.parsed);
     const [, found] = await oO(this.getOneOrFail(req, returnShallow));
-    let toSave = !allowParamsOverride
+    const toSave = !allowParamsOverride
       ? { ...tdto, ...paramsFilters, ...req.parsed.authPersist }
       : { ...paramsFilters, ...tdto, ...req.parsed.authPersist };
 
-    let replaced: Model<T>;
+    let replaced: Model;
     if (found) {
       found.set(toSave);
       replaced = await found.save();
     } else {
       // don't set id if this record is not found, let the db set it
       delete toSave.id;
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
       const obj = this.model.build(toSave);
       replaced = await obj.save();
     }
@@ -230,17 +215,16 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
     if (returnShallow) {
       return replaced as T;
     } else {
-      const primaryParams = this.getPrimaryParams(req.options);
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      const primaryParam = this.getPrimaryParam(req.options);
 
       /* istanbul ignore if */
-      if (!primaryParams.length) {
+      if (!primaryParam) {
         return replaced as T;
       }
 
-      req.parsed.search = primaryParams.reduce(
-        (acc, p) => ({ ...acc, [p]: replaced[p] }),
-        {},
-      );
+      req.parsed.search = { [primaryParam]: replaced[primaryParam] };
       return this.getOneOrFail(req);
     }
   }
@@ -259,7 +243,7 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
   }
 
   public getParamFilters(parsed: CrudRequest['parsed']): Record<string, any> {
-    let filters = {};
+    const filters = {};
 
     /* istanbul ignore else */
     if (hasLength(parsed.paramsFilter)) {
@@ -269,6 +253,17 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
     }
 
     return filters;
+  }
+
+  public decidePagination(
+    parsed: ParsedRequestParams,
+    options: CrudRequestOptions,
+  ): boolean {
+    return (
+      options.query.alwaysPaginate ||
+      ((Number.isFinite(parsed.page) || Number.isFinite(parsed.offset)) &&
+        !!this.getTake(parsed, options.query))
+    );
   }
 
   /**
@@ -284,8 +279,8 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
   ): Sequelize.FindOptions {
     // create query builder
     const query: Sequelize.FindOptions = {
-      where: {},
       subQuery: false,
+      where: {},
       attributes: [],
       include: [],
       order: [],
@@ -293,44 +288,49 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
       offset: null,
     };
     // get select fields
-    query.attributes = _.uniq(this.getSelect(parsed, options.query));
+    query.attributes = this.getSelect(parsed, options.query);
 
     // set joins
     const joinOptions: JoinOptions = options.query.join || {};
     const allowedJoins = objKeys(joinOptions);
 
-    let joinsArray: Sequelize.IncludeOptions[] = [];
-    if (hasLength(allowedJoins)) {
-      const eagerJoins: any = {};
+    const joinsArray: Sequelize.IncludeOptions[] = [];
+    // if (hasLength(allowedJoins)) {
+    const eagerJoins: any = {};
 
-      for (let i = 0; i < allowedJoins.length; i++) {
+    for (let i = 0; i < allowedJoins.length; i++) {
+      /* istanbul ignore else */
+      if (joinOptions[allowedJoins[i]].eager) {
+        const cond = parsed.join.find(
+          (j) => j && j.field === allowedJoins[i],
+        ) || {
+          field: allowedJoins[i],
+        };
+        const include = this.createInclude(cond, joinOptions);
         /* istanbul ignore else */
-        if (joinOptions[allowedJoins[i]].eager) {
-          const cond = parsed.join.find(
-            (j) => j && j.field === allowedJoins[i],
-          ) || {
-            field: allowedJoins[i],
-          };
-          const include = this.setJoin(cond, joinOptions);
-          /* istanbul ignore else */
+        if (include) {
+          joinsArray.push(include);
+        }
+        eagerJoins[allowedJoins[i]] = true;
+      }
+    }
+
+    if (isArrayFull(parsed.join)) {
+      for (let i = 0; i < parsed.join.length; i++) {
+        /* istanbul ignore else */
+        if (!eagerJoins[parsed.join[i].field]) {
+          const include = this.createInclude(parsed.join[i], joinOptions);
           if (include) {
             joinsArray.push(include);
           }
-          eagerJoins[allowedJoins[i]] = true;
         }
       }
+    }
+    // }
 
-      if (isArrayFull(parsed.join)) {
-        for (let i = 0; i < parsed.join.length; i++) {
-          /* istanbul ignore else */
-          if (!eagerJoins[parsed.join[i].field]) {
-            const include = this.setJoin(parsed.join[i], joinOptions);
-            if (include) {
-              joinsArray.push(include);
-            }
-          }
-        }
-      }
+    if (isArrayFull(joinsArray)) {
+      // convert nested joins
+      query.include = this.convertNestedInclusions(joinsArray);
     }
 
     // search
@@ -343,17 +343,7 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
         }
       });
     }
-    query.where = this.buildWhere({
-      search: parsed.search,
-      aliases,
-      joinsArray,
-    });
-    // console.log('WHERE', JSON.stringify(this.conditionalToPrintableObject(query.where), null, 2));
-
-    if (isArrayFull(joinsArray)) {
-      // convert nested joins
-      query.include = this.convertNestedInclusions(joinsArray);
-    }
+    query.where = this.buildWhere(parsed.search, aliases);
 
     /* istanbul ignore else */
     if (many) {
@@ -361,7 +351,6 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
       query.order = this.mapSort(
         parsed.sort,
         joinsArray.map((join) => join.association),
-        joinOptions,
       );
       // set take
       const take = this.getTake(parsed, options.query);
@@ -410,7 +399,7 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
       // ensure the include objects exist
       for (let i = 0; i < names.length - 1; ++i) {
         childInclude = parentInclude.include.find(
-          (item: Sequelize.IncludeOptions) => item.association === names[i],
+          (item: any) => item.association === names[i],
         ) as Sequelize.IncludeOptions;
         /* istanbul ignore if */
         if (!childInclude) {
@@ -426,172 +415,68 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
       }
       /* istanbul ignore else */
       if (parentInclude) {
-        parentInclude.include.push({
+        parentInclude.include = parentInclude.include.concat({
           ...include,
           association: _.last(names),
         });
+        // parentInclude.include.push({
+        //   ...include,
+        //   association: _.last(names),
+        // });
       }
     });
     return convertedInclusions;
   }
 
-  isBelongsTo(associationChain: string[]): boolean {
-    let cur: typeof Sequelize.Model = this.model;
-    for (const associationStr of associationChain) {
-      const association = cur.associations[associationStr];
-      if (!association || association.associationType !== 'BelongsTo') {
-        return false;
-      }
-      cur = association.target;
-    }
-    return true;
-  }
-
-  private isEmptyWhereConditional(where: any) {
-    const yes =
-      where === undefined ||
-      (Array.isArray(where) && where.length === 0) ||
-      (isObject(where) &&
-        Object.keys(where).length === 0 &&
-        Object.getOwnPropertySymbols(where).length === 0);
-    return yes;
-  }
-
-  private parsePath(
-    path: string,
-    joinsArray: Sequelize.IncludeOptions[],
-    aliases,
-  ): {
-    field: string;
-    associations: string[];
-    normalized: string;
-    tablePath: string;
-    joinObject?: Sequelize.IncludeOptions;
-    path: string;
-  } {
-    if (path.indexOf('.') > -1) {
-      // a key from a joined table
-      let normalized = path;
-      if (path.length > 2 && path[0] === '$' && path[path.length - 1] === '$') {
-        normalized = path.slice(1, path.length - 1);
-      }
-      const tokens = normalized.split('.');
-      const associations = tokens
-        .slice(0, tokens.length - 1)
-        .map((name) => aliases[name] || name);
-      const field = tokens[tokens.length - 1];
-      const tablePath = associations.join('.');
-      const joinObject = joinsArray.find(
-        (join) => join.association === tablePath,
-      );
-      return {
-        field: field,
-        associations,
-        normalized,
-        tablePath,
-        joinObject,
-        path,
-      };
-    }
-
-    return {
-      field: path,
-      associations: [],
-      normalized: path,
-      tablePath: path,
-      path,
-    };
-  }
-
-  protected buildWhere({
-    search,
-    aliases,
-    joinsArray,
+  protected buildWhere(
+    search: any,
+    aliases: Record<string, string>,
     field = '',
-  }: {
-    search: any;
-    aliases: Record<string, string>;
-    joinsArray: Sequelize.IncludeOptions[];
-    field?: string;
-    referencedTables?: Set<string>;
-  }): Record<string, any> {
+  ): Record<string, any> {
     let where: any;
     if (Array.isArray(search)) {
-      where = search
-        .map((item) => this.buildWhere({ search: item, aliases, joinsArray }))
-        .filter((where) => !this.isEmptyWhereConditional(where));
-    } else if (isObject(search)) {
+      where = search.map((item) => this.buildWhere(item, aliases));
+    } else if (isObject(search) && !isDate(search)) {
       const keys = Object.keys(search);
       const objects = keys.map((key) => {
         if (this.isOperator(key)) {
-          where = this.buildWhere({
-            search: search[key],
-            aliases,
-            joinsArray,
-            field,
-          });
-          if (this.isEmptyWhereConditional(where)) {
-            return undefined;
-          }
           const { obj } = this.mapOperatorsToQuery({
             field,
             operator: key as ComparisonOperator,
-            value: where,
+            value: this.buildWhere(search[key], aliases, field),
           });
           return obj;
         } else if (key === '$and') {
-          where = this.buildWhere({ search: search[key], aliases, joinsArray });
-          if (this.isEmptyWhereConditional(where)) {
-            return undefined;
-          }
-          return {
-            [Sequelize.Op.and]: where,
-          };
+          return { [Sequelize.Op.and]: this.buildWhere(search[key], aliases) };
         } else if (key === '$or') {
-          where = this.buildWhere({ search: search[key], aliases, joinsArray });
-          if (this.isEmptyWhereConditional(where)) {
-            return undefined;
-          }
-          return { [Sequelize.Op.or]: where };
+          return { [Sequelize.Op.or]: this.buildWhere(search[key], aliases) };
         } else {
-          const parsedPath = this.parsePath(key, joinsArray, aliases);
-          if (parsedPath.associations.length > 0) {
-            where = this.buildWhere({
-              search: search[key],
-              aliases,
-              joinsArray,
-              field: parsedPath.normalized,
-            });
-            if (this.isEmptyWhereConditional(where)) {
-              return undefined;
-            }
-            if (
-              parsedPath.joinObject &&
-              !this.isBelongsTo(parsedPath.associations)
-            ) {
-              parsedPath.joinObject.where = {
-                ...parsedPath.joinObject.where,
-                [parsedPath.field]: where,
-              };
-              return undefined;
+          if (key.indexOf('.') > -1) {
+            const keyParts = key.split('.');
+            const lastKey = keyParts.pop();
+            let rel = null;
+            // nested filter
+            if (Array.isArray(keyParts) && keyParts.length > 1) {
+              rel = keyParts.reduce((acc, currentKeyPart) => {
+                acc = acc.associations[currentKeyPart].target;
+              }, this.model.associations[keyParts[0]].target as any);
             } else {
-              return {
-                [`$${[parsedPath.tablePath, parsedPath.field].join('.')}$`]:
-                  where,
-              };
+              rel = this.model.associations[keyParts[0]].target;
             }
+            const realKey = rel.rawAttributes[lastKey].field;
+            // a key from a joined table
+            const normalized = [keyParts.join('.'), realKey]
+              .map((name) => aliases[name] || name)
+              .join('.');
+            return {
+              [`$${normalized}$`]: this.buildWhere(
+                search[key],
+                aliases,
+                normalized,
+              ),
+            };
           }
-
-          where = this.buildWhere({
-            search: search[key],
-            aliases,
-            joinsArray,
-            field: key,
-          });
-          if (this.isEmptyWhereConditional(where)) {
-            return undefined;
-          }
-          return { [key]: where };
+          return { [key]: this.buildWhere(search[key], aliases, key) };
         }
       });
       where = Object.assign({}, ...objects);
@@ -602,15 +487,10 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
     return where;
   }
 
-  mapSort(
-    sorts: { field: string; order: string }[],
-    joinsArray,
-    joinOptions: JoinOptions,
-  ) {
+  mapSort(sorts: { field: string; order: string }[], joinsArray: any) {
     const params: any[] = [];
     sorts.forEach((sort) => {
-      this.checkSqlInjection(sort.field);
-      this.validateHasColumn(sort.field, joinOptions);
+      this.validateHasColumn(sort.field);
       if (sort.field.indexOf('.') === -1) {
         params.push([sort.field, sort.order]);
       } else {
@@ -619,19 +499,13 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
           0,
           sort.field.lastIndexOf('.'),
         );
-        const relation = this.getRelationMetadata(
-          associationName,
-          joinOptions[sort.field],
-        );
+        const relation = this.findRelation(associationName);
         /* istanbul ignore else */
         if (relation && joinsArray.indexOf(associationName) !== -1) {
-          let names = [];
+          const names: string[] = [];
           const modelList = associationName.split('.').map((k) => {
             names.push(k);
-            const relation = this.getRelationMetadata(
-              names.join('.'),
-              joinOptions[sort.field],
-            );
+            const relation = this.findRelation(names.join('.'));
             return {
               model: relation.target,
               as: relation.as,
@@ -654,11 +528,11 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
         ? query.fields.filter((field) => allowed.some((col) => field === col))
         : allowed;
 
-    return [
+    return _.uniq([
       ...(options.persist && options.persist.length ? options.persist : []),
       ...columns,
       ...this.entityPrimaryColumns,
-    ];
+    ]);
   }
 
   private getAllowedColumns(
@@ -679,53 +553,62 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
         );
   }
 
-  protected setJoin(
+  protected createInclude(
     cond: QueryJoin,
     joinOptions: JoinOptions,
   ): Sequelize.IncludeOptions | undefined {
-    const options = joinOptions[cond.field];
+    /* istanbul ignore else */
+    // if (cond.field && joinOptions[cond.field]) {
+    const relation = this.findRelation(cond.field);
+    /* istanbul ignore if */
+    if (!relation) {
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      return;
+    }
+    const options = joinOptions[cond.field] || {};
+    const allowed = this.getAllowedColumns(
+      Object.keys(relation.target.rawAttributes),
+      options,
+    );
 
-    if (!options) {
+    /* istanbul ignore if */
+    if (!allowed.length) {
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
       return;
     }
 
-    const allowedRelation = this.getRelationMetadata(cond.field, options);
-
-    if (!allowedRelation) {
-      return;
-    }
-
-    const columns = isArrayFull(cond.select)
-      ? cond.select.filter((column) =>
-          allowedRelation.allowedColumns.some((allowed) => allowed === column),
-        )
-      : allowedRelation.allowedColumns;
+    const columns =
+      !cond.select || !cond.select.length
+        ? allowed
+        : cond.select.filter((col) => allowed.some((a) => a === col));
 
     const attributes = [
-      ...allowedRelation.primaryColumns,
-      ...(isArrayFull(options.persist) ? options.persist : []),
+      ..._.map(relation.target.rawAttributes, (v) => v)
+        .filter((column) => column.primaryKey)
+        .map((column) => column.field),
+      ...(options.persist && options.persist.length ? options.persist : []),
       ...columns,
     ];
-
     return {
       association: cond.field,
-      attributes: _.uniq(options.select === false ? [] : attributes),
+      attributes,
       ...(!options || !options.required ? {} : { required: true }),
       ...(!options || !options.alias ? {} : { as: options.alias }),
     };
+    // }
+    //
+    // return;
   }
 
-  private validateHasColumn(column: string, joinOptions: JoinOptions) {
+  private validateHasColumn(column: string) {
     if (column.indexOf('.') !== -1) {
       const nests = column.split('.');
       column = nests[nests.length - 1];
       const associationName = nests.slice(0, nests.length - 1).join('.');
 
-      const relation = this.getRelationMetadata(
-        associationName,
-        joinOptions[column],
-      );
-      /* istanbul ignore if */
+      const relation = this.findRelation(associationName);
       if (!relation) {
         this.throwBadRequestException(`Invalid relation name '${relation}'`);
       }
@@ -738,7 +621,6 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
         );
       }
     } else {
-      /* istanbul ignore if */
       if (!this.hasColumn(column)) {
         this.throwBadRequestException(`Invalid column name '${column}'`);
       }
@@ -751,6 +633,8 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
     if (shallow) {
       query.include = undefined;
     }
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
     const found = await this.model.findOne(query);
 
     if (!found) {
@@ -764,61 +648,36 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
     return !!this.model.rawAttributes[column];
   }
 
-  getRelationMetadata(path, options: JoinOption) {
-    let allowedRelation: Relation;
-
-    if (this.entityRelationsHash.has(path)) {
-      allowedRelation = this.entityRelationsHash.get(path);
-    } else {
-      const names = path.split('.');
-      let model: any = this.model;
-      for (let i = 0; i < names.length; ++i) {
-        /* istanbul ignore else */
-        if (model) {
-          allowedRelation = model.associations[names[i]];
-          model = allowedRelation ? allowedRelation.target : undefined;
-        }
-      }
-
-      if (allowedRelation) {
-        allowedRelation.allowedColumns = this.getAllowedColumns(
-          Object.keys(allowedRelation.target.rawAttributes),
-          options || {},
-        );
-        allowedRelation.primaryColumns = _.map(
-          allowedRelation.target.rawAttributes,
-          (v) => v,
-        )
-          .filter((column) => column.primaryKey)
-          .map((column) => column.field);
-
-        this.entityRelationsHash.set(path, allowedRelation);
-        if (options && options.alias) {
-          this.entityRelationsHash.set(options.alias, allowedRelation);
-        }
+  findRelation(path: string) {
+    const names = path.split('.');
+    let association: Sequelize.Association;
+    let model: any = this.model;
+    for (let i = 0; i < names.length; ++i) {
+      /* istanbul ignore else */
+      if (model) {
+        association = model.associations[names[i]];
+        model = association ? association.target : undefined;
       }
     }
 
-    return allowedRelation;
+    return association;
   }
 
   private onInitMapEntityColumns() {
-    const columns = Object.keys(this.model.rawAttributes || {}).map(
+    const columns = Object.keys(this.model.rawAttributes).map(
       (key) => this.model.rawAttributes[key],
     );
-    this.entityColumns = Object.keys(this.model.rawAttributes || {}).map(
-      (column) => {
-        this.entityColumnsHash[column] = true;
-        return column;
-      },
-    );
+    this.entityColumns = Object.keys(this.model.rawAttributes).map((column) => {
+      this.entityColumnsHash[column] = true;
+      return column;
+    });
     this.entityPrimaryColumns = columns
       .filter((column) => column.primaryKey)
       .map((column) => column.field);
   }
 
   protected prepareEntityBeforeSave(dto: T, parsed: CrudRequest['parsed']): T {
-    let obj = JSON.parse(JSON.stringify(dto));
+    const obj = JSON.parse(JSON.stringify(dto));
     /* istanbul ignore if */
     if (!isObject(obj)) {
       return undefined;
@@ -835,6 +694,27 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
       return undefined;
     }
     return Object.assign(obj, parsed.authPersist);
+  }
+
+  private onInitMapRelations() {
+    const result = {};
+    Object.keys(this.model.associations).forEach((key) => {
+      result[key] = {
+        type: this.model.associations[key].associationType,
+        columns: Object.keys(this.model.associations[key].target.rawAttributes),
+        referencedColumn: this.model.associations[key].foreignKey,
+        name: key,
+        modelName: this.model.associations[key].target.name,
+      };
+      if (
+        ['HasMany', 'BelongsToMany'].indexOf(
+          this.model.associations[key].associationType,
+        ) !== -1
+      ) {
+        this.hasManyRelations.push(key);
+      }
+    });
+    this.entityRelationsHash = result;
   }
 
   get operators() {
@@ -876,273 +756,194 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
     return this.operators[str.replace('$', '')];
   }
 
-  /**
-   * Get primary param name from CrudOptions
-   * @param options
-   */
-  getPrimaryParams(options: CrudRequestOptions): string[] {
-    const params = objKeys(options.params).filter(
-      (n) => options.params[n] && options.params[n].primary,
-    );
-
-    return params.map((p) => options.params[p].field);
-  }
-
-  private escapeFieldname(field: string) {
-    if (field.includes('.')) {
-      return field;
-    }
-    // add the table to the attribute name
-    return [this.model.name, field].join('.');
-  }
-
   protected mapOperatorsToQuery(cond: QueryFilter) {
-    let obj: {};
-    let opKey = cond.operator.replace('$', '') as string;
-    const field = this.escapeFieldname(cond.field);
-    switch (opKey) {
+    let obj: any = {};
+    switch (cond.operator) {
       case 'eq':
+      case CondOperator.EQUALS:
         obj = {
-          [Sequelize.Op.eq]: cond.value,
+          [Op.eq]: cond.value,
         };
         break;
 
-      /* istanbul ignore next */
-      case 'ne':
+      case CondOperator.EQUALS_LOW:
         obj = {
-          [Sequelize.Op.ne]: cond.value,
+          [Op.like]: cond.value,
+        };
+        break;
+
+      case 'ne':
+      case CondOperator.NOT_EQUALS:
+        obj = {
+          [Op.ne]: cond.value,
+        };
+        break;
+
+      case CondOperator.NOT_EQUALS_LOW:
+        obj = {
+          [Op.notLike]: cond.value,
         };
         break;
 
       case 'gt':
+      case CondOperator.GREATER_THAN:
         obj = {
-          [Sequelize.Op.gt]: cond.value,
+          [Op.gt]: cond.value,
         };
         break;
 
       case 'lt':
+      case CondOperator.LOWER_THAN:
         obj = {
-          [Sequelize.Op.lt]: cond.value,
+          [Op.lt]: cond.value,
         };
         break;
 
       case 'gte':
+      case CondOperator.GREATER_THAN_EQUALS:
         obj = {
-          [Sequelize.Op.gte]: cond.value,
+          [Op.gte]: cond.value,
         };
         break;
 
       case 'lte':
+      case CondOperator.LOWER_THAN_EQUALS:
         obj = {
-          [Sequelize.Op.lte]: cond.value,
+          [Op.lte]: cond.value,
         };
         break;
 
       case 'starts':
+      case CondOperator.STARTS:
         obj = {
-          [Sequelize.Op.like]: `${cond.value}%`,
+          [Op.like]: `${cond.value}%`,
+        };
+        break;
+
+      case CondOperator.STARTS_LOW:
+        obj = {
+          [Op.iLike]: `${cond.value}%`,
         };
         break;
 
       case 'ends':
+      case CondOperator.ENDS:
         obj = {
-          [Sequelize.Op.like]: `%${cond.value}`,
+          [Op.like]: `%${cond.value}`,
+        };
+        break;
+
+      case CondOperator.ENDS_LOW:
+        obj = {
+          [Op.iLike]: `%${cond.value}`,
         };
         break;
 
       case 'cont':
+      case CondOperator.CONTAINS:
         obj = {
-          [Sequelize.Op.like]: `%${cond.value}%`,
+          [Op.iLike]: `%${cond.value}%`,
+        };
+        break;
+
+      case CondOperator.CONTAINS_LOW:
+        obj = {
+          [Op.iLike]: `%${cond.value}%`,
         };
         break;
 
       case 'excl':
+      case CondOperator.EXCLUDES:
         obj = {
-          [Sequelize.Op.notLike]: `%${cond.value}%`,
+          [Op.notLike]: `%${cond.value}%`,
+        };
+        break;
+
+      case CondOperator.EXCLUDES_LOW:
+        obj = {
+          [Op.notILike]: `%${cond.value}%`,
         };
         break;
 
       case 'in':
-        this.checkFilterIsArray(cond);
+      case CondOperator.IN:
+        /* istanbul ignore if */
+        if (!Array.isArray(cond.value) || !cond.value.length) {
+          this.throwBadRequestException(`Invalid column '${cond.field}' value`);
+        }
         obj = {
-          [Sequelize.Op.in]: cond.value,
+          [Op.in]: cond.value,
+        };
+        break;
+
+      case CondOperator.IN_LOW:
+        /* istanbul ignore if */
+        if (!Array.isArray(cond.value) || !cond.value.length) {
+          this.throwBadRequestException(`Invalid column '${cond.field}' value`);
+        }
+        obj = {
+          [Op.in]: cond.value.map((v: string) => (v ? v.toLowerCase() : v)),
         };
         break;
 
       case 'notin':
-        this.checkFilterIsArray(cond);
+      case CondOperator.NOT_IN:
+        /* istanbul ignore if */
+        if (!Array.isArray(cond.value) || !cond.value.length) {
+          this.throwBadRequestException(`Invalid column '${cond.field}' value`);
+        }
         obj = {
-          [Sequelize.Op.notIn]: cond.value,
+          [Op.notIn]: cond.value,
+        };
+        break;
+
+      case CondOperator.NOT_IN_LOW:
+        /* istanbul ignore if */
+        if (!Array.isArray(cond.value) || !cond.value.length) {
+          this.throwBadRequestException(`Invalid column '${cond.field}' value`);
+        }
+        obj = {
+          [Op.notIn]: cond.value.map((v: string) => (v ? v.toLowerCase() : v)),
         };
         break;
 
       case 'isnull':
+      case CondOperator.IS_NULL:
         obj = {
-          [Sequelize.Op.is]: null,
+          [Op.is]: null,
         };
         break;
 
       case 'notnull':
+      case CondOperator.NOT_NULL:
         obj = {
-          [Sequelize.Op.not]: null,
+          [Op.not]: null,
         };
         break;
 
       case 'between':
-        this.checkFilterIsArray(cond);
+      case CondOperator.BETWEEN:
+        /* istanbul ignore if */
+        if (
+          !Array.isArray(cond.value) ||
+          !cond.value.length ||
+          cond.value.length !== 2
+        ) {
+          this.throwBadRequestException(`Invalid column '${cond.field}' value`);
+        }
         obj = {
-          [Sequelize.Op.between]: cond.value,
-        };
-        break;
-      // case insensitive
-      case 'eqL':
-        obj = {
-          [Sequelize.Op.and]: [
-            Sequelize.where(
-              Sequelize.fn(
-                'lower',
-                Sequelize.cast(Sequelize.col(field), 'text'),
-              ),
-              Sequelize.fn('lower', cond.value),
-            ),
-          ],
-        };
-        break;
-
-      case 'neL':
-        obj = {
-          [Sequelize.Op.and]: [
-            Sequelize.where(
-              Sequelize.fn(
-                'lower',
-                Sequelize.cast(Sequelize.col(field), 'text'),
-              ),
-              '!=',
-              Sequelize.fn('lower', cond.value),
-            ),
-          ],
-        };
-        break;
-
-      case 'startsL':
-        obj = {
-          [Sequelize.Op.and]: [
-            Sequelize.where(
-              Sequelize.fn(
-                'lower',
-                Sequelize.cast(Sequelize.col(field), 'text'),
-              ),
-              'like',
-              Sequelize.fn('lower', `${cond.value}%`),
-            ),
-          ],
-        };
-        break;
-
-      case 'endsL':
-        obj = {
-          [Sequelize.Op.and]: [
-            Sequelize.where(
-              Sequelize.fn(
-                'lower',
-                Sequelize.cast(Sequelize.col(field), 'text'),
-              ),
-              'like',
-              Sequelize.fn('lower', `%${cond.value}`),
-            ),
-          ],
-        };
-        break;
-
-      case 'contL':
-        obj = {
-          [Sequelize.Op.and]: [
-            Sequelize.where(
-              Sequelize.fn(
-                'lower',
-                Sequelize.cast(Sequelize.col(field), 'text'),
-              ),
-              'like',
-              Sequelize.fn('lower', `%${cond.value}%`),
-            ),
-          ],
-        };
-        break;
-
-      case 'exclL':
-        obj = {
-          [Sequelize.Op.and]: [
-            Sequelize.where(
-              Sequelize.fn(
-                'lower',
-                Sequelize.cast(Sequelize.col(field), 'text'),
-              ),
-              'not like',
-              Sequelize.fn('lower', `%${cond.value}%`),
-            ),
-          ],
-        };
-        break;
-
-      case 'inL':
-        this.checkFilterIsArray(cond);
-        obj = {
-          [Sequelize.Op.and]: [
-            Sequelize.where(
-              Sequelize.fn(
-                'lower',
-                Sequelize.cast(Sequelize.col(field), 'text'),
-              ),
-              'in',
-              {
-                [Sequelize.Op.in]: cond.value.map((value) =>
-                  value.toLowerCase(),
-                ),
-              },
-            ),
-          ],
-        };
-        break;
-
-      case 'notinL':
-        this.checkFilterIsArray(cond);
-        obj = {
-          [Sequelize.Op.and]: [
-            Sequelize.where(
-              Sequelize.fn(
-                'lower',
-                Sequelize.cast(Sequelize.col(field), 'text'),
-              ),
-              'not in',
-              {
-                [Sequelize.Op.notIn]: cond.value.map((value) =>
-                  value.toLowerCase(),
-                ),
-              },
-            ),
-          ],
+          [Op.between]: cond.value,
         };
         break;
 
       /* istanbul ignore next */
       default:
         obj = {
-          [Sequelize.Op.eq]: cond.value,
+          [Op.eq]: cond.value,
         };
         break;
     }
-    return { field, obj };
-  }
-
-  private checkFilterIsArray(cond: QueryFilter, withLength?: boolean) {
-    /* istanbul ignore if */
-    if (
-      !Array.isArray(cond.value) ||
-      !cond.value.length ||
-      (!isNil(withLength) ? /* istanbul ignore next */ withLength : false)
-    ) {
-      this.throwBadRequestException(`Invalid column '${cond.field}' value`);
-    }
+    return { field: cond.field, obj };
   }
 
   private transformDto(dto: T) {
@@ -1151,17 +952,57 @@ export class SequelizeCrudService<T extends Model> extends CrudService<T> {
     );
   }
 
-  private checkSqlInjection(field: string): string {
-    /* istanbul ignore else */
-    if (this.sqlInjectionRegEx.length) {
-      for (let i = 0; i < this.sqlInjectionRegEx.length; i++) {
-        /* istanbul ignore else */
-        if (this.sqlInjectionRegEx[0].test(field)) {
-          this.throwBadRequestException(`SQL injection detected: "${field}"`);
-        }
+  protected async executeQuery(parsed: any, options: any, query: any) {
+    if (this.decidePagination(parsed, options)) {
+      const data = await this.modelFindAll(query, parsed, options);
+      if (query.include.length) {
+        query.include = query.include.filter(
+          (i: any) => this.hasManyRelations.indexOf(i.association) === -1,
+        );
       }
+      const total = await this.modelCount(
+        { where: query.where, include: query.include },
+        parsed,
+        options,
+      );
+      return this.createPageInfo(
+        data as T[],
+        total,
+        this.getTake(query, options),
+        query.offset,
+      );
     }
+    return this.modelFindAll(query, parsed, options);
+  }
 
-    return field;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  protected modelFindAll(query: any, _parsed?: any, _options?: any) {
+    const scopes = Object.keys(this.model.options.scopes);
+    if (scopes.includes(FIND_ALL_SCOPE)) {
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      return this.model.scope(FIND_ALL_SCOPE).findAll(query);
+    }
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    return this.model.findAll(query);
+  }
+
+  protected modelCount(
+    query: any,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _parsed?: any,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _options?: any,
+  ): Promise<number> {
+    const scopes = Object.keys(this.model.options.scopes);
+    if (scopes.includes(COUNT_SCOPE)) {
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      return this.model.scope(COUNT_SCOPE).count(query as CountOptions);
+    }
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    return this.model.count(query as CountOptions);
   }
 }

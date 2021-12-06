@@ -3,9 +3,7 @@ import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
 import { IAppConfig, IServer } from './app-config';
 import { ValidationPipe } from '@nestjs/common';
-import { CrudConfigService } from '@nestjsx/crud';
-import { CrudWrapperInterceptor, LocalizationSetter } from './shared';
-
+import { LocalizationSetter } from './shared';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
