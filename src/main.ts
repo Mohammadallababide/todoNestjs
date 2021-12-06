@@ -4,9 +4,15 @@ import { ConfigService } from '@nestjs/config';
 import { IAppConfig, IServer } from './app-config';
 import { ValidationPipe } from '@nestjs/common';
 import { LocalizationSetter } from './shared';
+import cookieParser from 'cookie-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  app.use(cookieParser());
+  app.enableCors({
+    origin: true,
+    credentials: true,
+  });
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(
     new ValidationPipe({
