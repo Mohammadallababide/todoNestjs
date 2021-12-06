@@ -6,9 +6,9 @@ import {
   NotEnoughDataException,
   SpaAuthConstants,
   SpaAuthOptions,
-} from '@app/user-auth/shared';
+} from '../shared';
 import { JwtService } from '@nestjs/jwt';
-import { TokensDto } from '@app/user-auth/dtos';
+import { TokensDto } from '../dtos';
 
 @Injectable()
 export class SpaAuthService {

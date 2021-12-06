@@ -1,4 +1,4 @@
-import { DynamicModule, Module, Provider } from '@nestjs/common';
+import { DynamicModule, Global, Module, Provider } from '@nestjs/common';
 import { SpaAuthService } from './services';
 import { JwtModule } from '@nestjs/jwt';
 import {
@@ -6,8 +6,9 @@ import {
   SpaAuthModuleAsyncOptions,
   SpaAuthModuleOptionsFactory,
   SpaAuthOptions,
-} from '@app/user-auth/shared';
-import { JwtStrategy } from '@app/user-auth/strategies';
+} from './shared';
+import { JwtStrategy } from './strategies';
+@Global()
 @Module({})
 export class UserAuthModule {
   static register(options: SpaAuthOptions): DynamicModule {

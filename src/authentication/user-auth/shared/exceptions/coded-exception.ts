@@ -1,5 +1,5 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
-import { AccessType, ExceptionCode } from '@app/user-auth/shared';
+import { AccessType, ExceptionCode } from '../index';
 
 export class CodedException extends HttpException {
   code: ExceptionCode;

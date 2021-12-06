@@ -11,17 +11,20 @@ import {
   UseFilters,
   UseGuards,
 } from '@nestjs/common';
-import { JwtExceptionFilter } from '@app/user-auth/filters';
+import { JwtExceptionFilter } from './user-auth/filters';
 import { Response } from 'express';
-import { SpaAuthService } from '@app/user-auth/services';
+import { SpaAuthService } from './user-auth/services';
 import {
   AccountNotYetActivatedException,
   BadLoginCredentialsException,
   Role,
   SpaAuthConstants,
-} from '@app/user-auth/shared';
-import { TokensDto } from '@app/user-auth/dtos';
-import { JwtAuthGuard } from '@app/user-auth/guards';
+} from './user-auth/shared';
+import { TokensDto } from './user-auth/dtos';
+import { JwtAuthGuard } from './user-auth/guards';
+import { AuthenticationService } from './authentication.service';
+import { CreateUserDto, FindUserDto, UserDto } from './user/dtos';
+import { User } from './user/models';
 export type UserType = {
   email: string;
   role?: Role;
@@ -35,20 +38,26 @@ export const currentUsers: UserType[] = [];
 export class AuthController {
   constructor(
     @Inject(SpaAuthConstants.SPA_AUTH_SERVICE_TOKEN)
-    private readonly authService: SpaAuthService,
+    private readonly spaAuthService: SpaAuthService,
+    private readonly authenticationService: AuthenticationService,
   ) {}
 
   @Post('/login')
   @HttpCode(HttpStatus.OK)
-  async login(@Body() data: UserType, @Res() response: Response): Promise<any> {
-    const user = currentUsers.filter(
-      (user) => user.id === data['id'] || user.email === data['email'],
-    )[0];
+  async login(
+    @Body() findUserDto: FindUserDto,
+    @Res() response: Response,
+  ): Promise<any> {
+    const user = await this.authenticationService.findUser<User>({
+      where: {
+        id: findUserDto.id,
+      },
+    });
     if (!user) throw new BadLoginCredentialsException();
-    if (user.isActivated == false) throw new AccountNotYetActivatedException();
 
-    const cookies = await this.authService.generateAccessTokenAsTwoCookies(
-      user,
+    // if (user.isActivated == false) throw new AccountNotYetActivatedException();
+    const cookies = await this.spaAuthService.generateAccessTokenAsTwoCookies(
+      user['dataValues'],
       {
         secure: true,
         expires: new Date(new Date().getTime() + 30 * 60 * 1000),
@@ -79,20 +88,13 @@ export class AuthController {
   }
 
   @Post('/sign-up')
-  createNewUser(@Body() user: UserType) {
-    const created = {
-      ...user,
-      role: user.role || Role.USER,
-      isActivated: true,
-      id: new Date().toISOString(),
-    };
-    currentUsers.push(created);
-    return created;
+  createNewUser(@Body() createUserDto: CreateUserDto) {
+    return this.authenticationService.createUser(createUserDto);
   }
   @Get('/refresh')
   async refreshToken(@Query('token') token: string): Promise<TokensDto> {
-    const payload = this.authService.verifyRefreshToken(token);
-    return this.authService.generateTokens(payload);
+    const payload = this.spaAuthService.verifyRefreshToken(token);
+    return this.spaAuthService.generateTokens(payload);
   }
 
   @Get()

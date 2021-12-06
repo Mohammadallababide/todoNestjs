@@ -1,11 +1,7 @@
 import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
-import {
-  SpaAuthConstants,
-  SpaAuthOptions,
-  StrategiesNames,
-} from '@app/user-auth/shared';
+import { SpaAuthConstants, SpaAuthOptions, StrategiesNames } from '../shared';
 import { Request } from 'express';
 
 export function extractJWTFromCookies(req: Request): string | null {
