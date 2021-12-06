@@ -13,8 +13,13 @@ import { Todo } from './models';
     update: UpdateTodoDto,
   },
   serialize: {
-    get: Todo,
-    create: Todo,
+    get: false,
+    getMany: false,
+    create: false,
+    createMany: false,
+    update: false,
+    replace: false,
+    delete: false,
   },
   query: {
     alwaysPaginate: true,
