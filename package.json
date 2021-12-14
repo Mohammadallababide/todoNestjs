@@ -1,7 +1,7 @@
 {
   "name": "todo-app",
   "version": "0.0.1",
-  "description": "",
+  "description": "Built in NestJS",
   "author": "",
   "private": true,
   "license": "UNLICENSED",
@@ -25,26 +25,33 @@
     "@nestjs/common": "^8.0.0",
     "@nestjs/config": "^1.1.5",
     "@nestjs/core": "^8.0.0",
+    "@nestjs/jwt": "^8.0.0",
+    "@nestjs/passport": "^8.0.1",
     "@nestjs/platform-express": "^8.0.0",
     "@nestjs/sequelize": "^8.0.0",
     "@nestjs/swagger": "^5.1.5",
+    "@nestjs/typeorm": "^8.0.2",
     "@nestjsx/crud": "^4.4.1",
     "@nestjsx/crud-request": "^4.4.1",
     "@nestjsx/util": "^5.0.0-alpha.3",
     "@zmotivat0r/o0": "^1.0.2",
     "accept-language-parser": "^1.5.0",
+    "bcryptjs": "^2.4.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.13.2",
     "iso-639-1": "^2.1.10",
     "joi": "^17.5.0",
     "js-yaml": "^4.1.0",
     "loadash": "^1.0.0",
+    "passport": "^0.5.0",
+    "passport-jwt": "^4.0.0",
     "pg": "^8.7.1",
     "reflect-metadata": "^0.1.13",
     "rimraf": "^3.0.2",
     "rxjs": "^7.2.0",
     "sequelize": "^6.11.0",
-    "sequelize-typescript": "^2.1.1"
+    "sequelize-typescript": "^2.1.1",
+    "typeorm": "^0.2.41"
   },
   "devDependencies": {
     "@nestjs/cli": "^8.0.0",
@@ -88,5 +95,18 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
-  }
+  },
+  "main": ".eslintrc.js",
+  "directories": {
+    "test": "test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mohammadallababide/todoNestjs.git"
+  },
+  "keywords": [],
+  "bugs": {
+    "url": "https://github.com/Mohammadallababide/todoNestjs/issues"
+  },
+  "homepage": "https://github.com/Mohammadallababide/todoNestjs#readme"
 }
