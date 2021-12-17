@@ -1,13 +1,13 @@
 import { Module } from '@nestjs/common';
 import { UserService } from './service/user.service';
 import { UserController } from './controller/user.controller';
-import { User } from './models/user.entity';
 import { AuthModule } from 'src/auth/auth.module';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { SequelizeModule } from '@nestjs/sequelize';
+import { User } from './models/user.model';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User]),
+    SequelizeModule.forFeature([User]),
     AuthModule
   ],
   providers: [UserService],
